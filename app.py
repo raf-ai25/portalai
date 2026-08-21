@@ -896,7 +896,7 @@ def login():
                     <div class="icon-box mx-auto mb-3">
                         <i class="fa-solid fa-layer-group"></i>
                     </div>
-                    <h4 class="fw-bold">ورود به پورتال سازمانی</h4>
+                    <h4 class="fw-bold">ورود به پلتفرم هوش مصنوعی</h4>
                     <p class="muted mb-0">نام کاربری و رمز عبور خود را وارد کنید.</p>
                 </div>
 
