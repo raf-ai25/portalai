@@ -1,5 +1,6 @@
 import os
 import secrets
+import unicodedata
 from functools import wraps
 from pathlib import Path
 
@@ -158,6 +159,28 @@ def current_user():
     return db.session.get(User, user_id)
 
 
+def normalize_role_value(role):
+    if role is None:
+        return ""
+    normalized = unicodedata.normalize("NFKC", str(role)).strip()
+    normalized = normalized.replace("ي", "ی").replace("ك", "ک")
+    return normalized
+
+
+def user_can_access_settings(user):
+    if not user:
+        return False
+
+    if getattr(user, "is_admin", False):
+        return True
+
+    role = getattr(user, "role", None)
+    if role is None:
+        return False
+
+    return normalize_role_value(role) == "مدیر"
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -181,7 +204,19 @@ def admin_required(view):
     @login_required
     def wrapped(*args, **kwargs):
         user = current_user()
-        if not user.is_admin:
+        if not user_can_access_settings(user):
+            abort(403)
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def superadmin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        user = current_user()
+        if not user or user.username != "admin":
             abort(403)
         return view(*args, **kwargs)
 
@@ -216,6 +251,7 @@ def global_context():
         "current_user": current_user(),
         "current_theme": session.get("theme", "default"),
         "csrf_token": get_csrf_token(),
+        "can_access_settings": user_can_access_settings,
     }
 
 
@@ -664,12 +700,14 @@ BASE_TEMPLATE = """
             </a>
 
 
-            {% if current_user.is_admin %}
+            {% if current_user and current_user.username == 'admin' %}
             <a class="nav-link" href="{{ url_for('users') }}">
                 <i class="fa-solid fa-users-gear"></i>
                 مدیریت کاربران
             </a>
+            {% endif %}
 
+            {% if current_user and can_access_settings(current_user) %}
             <a class="nav-link" href="{{ url_for('settings') }}">
                 <i class="fa-solid fa-sliders"></i>
                 تنظیمات و مدیریت محتوا
@@ -920,8 +958,8 @@ def login():
                 </form>
 
                 <div class="alert alert-warning mt-4 mb-0 small">
-                    ورود اولیه: <strong>admin</strong> /
-                    <strong>admin12345</strong>
+                    ورود اولیه: <strong>کاربر مهمان</strong> /
+                    <strong>با راهبر سامانه تماش بگیرید</strong>
                     <br>
                     پس از ورود، رمز مدیر را تغییر دهید.
                 </div>
@@ -1102,7 +1140,7 @@ def app_detail(app_id):
 
 # Users:
 @app.route("/users", methods=["GET", "POST"])
-@admin_required
+@superadmin_required
 def users():
     if request.method == "POST":
         action = request.form.get("action", "").strip()
@@ -1240,9 +1278,13 @@ def users():
             <div class="col-12">
                 <label class="form-label">دسترسی به دسته‌ها</label>
                 <div class="d-flex flex-wrap gap-2">
+                    <label class="badge text-bg-light border">
+                        <input type="checkbox" class="select-all-checkbox" data-target="create-category-access">
+                        انتخاب همه
+                    </label>
                     {% for category in categories %}
                     <label class="badge text-bg-light border">
-                        <input type="checkbox" name="category_ids" value="{{ category.id }}">
+                        <input type="checkbox" class="create-category-access" name="category_ids" value="{{ category.id }}">
                         {{ category.title }}
                     </label>
                     {% endfor %}
@@ -1252,9 +1294,13 @@ def users():
             <div class="col-12">
                 <label class="form-label">دسترسی به اپ‌ها</label>
                 <div class="d-flex flex-wrap gap-2">
+                    <label class="badge text-bg-light border">
+                        <input type="checkbox" class="select-all-checkbox" data-target="create-app-access">
+                        انتخاب همه
+                    </label>
                     {% for app in apps_list %}
                     <label class="badge text-bg-light border">
-                        <input type="checkbox" name="app_ids" value="{{ app.id }}">
+                        <input type="checkbox" class="create-app-access" name="app_ids" value="{{ app.id }}">
                         {{ app.title }}
                     </label>
                     {% endfor %}
@@ -1353,9 +1399,13 @@ def users():
                                 <div class="col-12">
                                     <label class="form-label">دسته‌های مجاز</label>
                                     <div class="d-flex flex-wrap gap-2">
+                                        <label class="badge text-bg-light border">
+                                            <input type="checkbox" class="select-all-checkbox" data-target="edit-category-access-{{ user.id }}">
+                                            انتخاب همه
+                                        </label>
                                         {% for category in categories %}
                                         <label class="badge text-bg-light border">
-                                            <input type="checkbox" name="category_ids" value="{{ category.id }}"
+                                            <input type="checkbox" class="edit-category-access-{{ user.id }}" name="category_ids" value="{{ category.id }}"
                                                    {% if category in user.categories %}checked{% endif %}>
                                             {{ category.title }}
                                         </label>
@@ -1366,9 +1416,13 @@ def users():
                                 <div class="col-12">
                                     <label class="form-label">اپ‌های مجاز</label>
                                     <div class="d-flex flex-wrap gap-2">
+                                        <label class="badge text-bg-light border">
+                                            <input type="checkbox" class="select-all-checkbox" data-target="edit-app-access-{{ user.id }}">
+                                            انتخاب همه
+                                        </label>
                                         {% for app in apps_list %}
                                         <label class="badge text-bg-light border">
-                                            <input type="checkbox" name="app_ids" value="{{ app.id }}"
+                                            <input type="checkbox" class="edit-app-access-{{ user.id }}" name="app_ids" value="{{ app.id }}"
                                                    {% if app in user.apps %}checked{% endif %}>
                                             {{ app.title }}
                                         </label>
@@ -1394,6 +1448,52 @@ def users():
             </table>
         </div>
     </div>
+
+    <script>
+    (function () {
+        function targetCheckboxes(control) {
+            var targetClass = control.getAttribute("data-target");
+            if (!targetClass) return [];
+            var escaped = window.CSS && CSS.escape
+                ? CSS.escape(targetClass)
+                : targetClass.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+            return document.querySelectorAll("." + escaped);
+        }
+
+        function updateSelectAll(control) {
+            var targets = targetCheckboxes(control);
+            var checkedCount = Array.prototype.filter.call(targets, function (checkbox) {
+                return checkbox.checked;
+            }).length;
+            control.checked = targets.length > 0 && checkedCount === targets.length;
+            control.indeterminate = checkedCount > 0 && checkedCount < targets.length;
+        }
+
+        function updateAllSelectControls() {
+            document.querySelectorAll(".select-all-checkbox").forEach(updateSelectAll);
+        }
+
+        function initializeSelectAll() {
+            updateAllSelectControls();
+            document.addEventListener("change", function (event) {
+                if (event.target.matches(".select-all-checkbox")) {
+                    targetCheckboxes(event.target).forEach(function (checkbox) {
+                        checkbox.checked = event.target.checked;
+                    });
+                    updateSelectAll(event.target);
+                } else if (event.target.matches("[class*='create-category-access'], [class*='create-app-access'], [class*='edit-category-access-'], [class*='edit-app-access-']")) {
+                    updateAllSelectControls();
+                }
+            });
+        }
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", initializeSelectAll);
+        } else {
+            initializeSelectAll();
+        }
+    })();
+    </script>
     """
 
     return render_page(
@@ -1405,7 +1505,7 @@ def users():
     )
 
 @app.post("/users/<int:user_id>/delete")
-@admin_required
+@superadmin_required
 def delete_user(user_id):
     user = db.session.get(User, user_id)
     if user is None:
@@ -2024,7 +2124,7 @@ def export_apps():
 
 
 @app.get("/users/export.xlsx")
-@admin_required
+@superadmin_required
 def export_users():
     users_list = User.query.order_by(User.id.asc()).all()
 
@@ -2214,7 +2314,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
     )
-
 
 
 
